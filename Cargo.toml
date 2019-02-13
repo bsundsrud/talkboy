@@ -1,0 +1,26 @@
+[package]
+name = "talkboy"
+version = "0.1.0"
+authors = ["Benn Sundsrud <benn.sundsrud@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+hyper = "*"
+futures = "^0.1"
+tokio = "*"
+har = { path = "../har-rs" }
+lazy_static = "*"
+failure = "*"
+slog = { version = "*", features = [ "max_level_trace" ] }
+slog-term = "*"
+slog-async = "*"
+clap = "*"
+hyper-rustls = "*"
+chrono = "*"
+cookie = "*"
+base64 = "*"
+serde = "*"
+serde_derive = "*"
+serde_json = "*"
+sha2 = "*"
+regex = "*"
