@@ -229,7 +229,7 @@ pub enum IncompleteEntryError {
 
 fn normalize_path(s: &str) -> String {
     lazy_static! {
-        static ref PATTERN: Regex = Regex::new("[[:^word:]]").unwrap();
+        static ref PATTERN: Regex = Regex::new("[[:^word:]--\\.]").unwrap();
     }
     let normalized = PATTERN.replace_all(s, "-").into_owned();
     if normalized.len() > 20 {
@@ -362,11 +362,12 @@ mod test {
     fn test_normalize_path() {
         use super::normalize_path;
 
-        assert_eq!("-test---path-q-20", normalize_path("/test/./path?q=20"));
+        assert_eq!("-test-.-path-q-20", normalize_path("/test/./path?q=20"));
         assert_eq!("nOth1ng_in_Her3", normalize_path("nOth1ng_in_Her3"));
         assert_eq!(
             "this-is-longer-than-",
             normalize_path("this is longer than 20 characters")
         );
+        assert_eq!("dots.ok", normalize_path("dots.ok"));
     }
 }
