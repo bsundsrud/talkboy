@@ -8,7 +8,7 @@ edition = "2018"
 hyper = "*"
 futures = "^0.1"
 tokio = "*"
-har = { path = "../har-rs" }
+har = "*"
 lazy_static = "*"
 failure = "*"
 slog = { version = "*", features = [ "max_level_trace" ] }

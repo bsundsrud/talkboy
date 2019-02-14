@@ -3,7 +3,7 @@ use super::{ArchivedRequest, RequestFacts};
 use base64;
 use failure::Error;
 use har::v1_2::*;
-use har::Har;
+use har::{Har, Spec};
 use hyper::{Method, Uri, Version};
 use serde_json;
 use slog::Logger;
@@ -102,16 +102,11 @@ impl HarLoader {
         let f = File::open(&path)?;
         let har: Har = serde_json::from_reader(f)?;
         trace!(self.logger, "Loaded HAR for {:?}", &path);
-        match har {
-            Har::V1_2(spec) => {
+        match har.log {
+            Spec::V1_2(log) => {
                 let fname = path.to_string_lossy().into_owned();
-                info!(self.logger, "Found HAR v1.2 with {} entries", spec.log.entries.len(); "path" => fname);
-                return spec
-                    .log
-                    .entries
-                    .iter()
-                    .map(|e| self.load_entry(e))
-                    .collect();
+                info!(self.logger, "Found HAR v1.2 with {} entries", log.entries.len(); "path" => fname);
+                return log.entries.iter().map(|e| self.load_entry(e)).collect();
             }
             _ => {}
         }

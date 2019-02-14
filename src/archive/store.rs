@@ -4,7 +4,7 @@ use chrono::prelude::*;
 use cookie::Cookie;
 use failure::Error;
 use har::v1_2::*;
-use har::Har;
+use har::{Har, Spec};
 use hyper::http::request::Parts as ReqParts;
 use hyper::http::response::Parts as ResParts;
 use hyper::Version;
@@ -26,7 +26,6 @@ pub struct HarSession {
 impl HarSession {
     pub fn new() -> HarSession {
         let log = Log {
-            version: "1.2".to_string(),
             creator: Creator {
                 name: "Talkboy".into(),
                 version: VERSION.to_string(),
@@ -38,8 +37,8 @@ impl HarSession {
             comment: None,
         };
 
-        let spec = Spec { log };
-        let har = Har::V1_2(spec);
+        let spec = Spec::V1_2(log);
+        let har = Har { log: spec };
         HarSession {
             har,
             start_date: None,
@@ -53,22 +52,24 @@ impl HarSession {
         self.start_date = Some(Utc::now());
     }
 
-    fn get_spec_mut(&mut self) -> &mut Spec {
-        let spec = match self.har {
-            Har::V1_2(ref mut s) => s,
+    fn get_log_mut(&mut self) -> &mut Log {
+        let log = match self.har.log {
+            Spec::V1_2(ref mut s) => s,
+            _ => unimplemented!(),
         };
-        spec
+        log
     }
 
-    fn get_spec(&self) -> &Spec {
-        let spec = match self.har {
-            Har::V1_2(ref s) => s,
+    fn get_log(&self) -> &Log {
+        let log = match self.har.log {
+            Spec::V1_2(ref s) => s,
+            _ => unimplemented!(),
         };
-        spec
+        log
     }
 
     pub fn add_entry(&mut self, entry: Entries) {
-        self.get_spec_mut().log.entries.push(entry);
+        self.get_log_mut().entries.push(entry);
     }
 
     pub fn record_request(&mut self, head: &ReqParts, body: Vec<u8>) {
@@ -173,7 +174,7 @@ impl HarSession {
     }
 
     pub fn file_hash(&self) -> Option<String> {
-        self.get_spec().log.entries.first().map(|e: &Entries| {
+        self.get_log().entries.first().map(|e: &Entries| {
             e.request
                 .comment
                 .as_ref()
