@@ -83,6 +83,7 @@ impl HarLoader {
         if !path.is_dir() {
             return Err(IoError::new(ErrorKind::NotFound, "Path is not a directory"));
         }
+        trace!(self.logger, "Reading files in {:?}", &path);
         let mut results = Vec::new();
         for entry in fs::read_dir(&path)? {
             let entry = entry?;

@@ -8,6 +8,7 @@ use slog::Logger;
 use std::fmt::Display;
 use std::fs;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 use toml;
 
@@ -88,7 +89,8 @@ fn playback_config_from_cli(
     trace!(logger, "Creating Playback config from CLI params");
     let socket_addr: SocketAddr = format!("{}:{}", addr, port).parse()?;
     let loader = HarLoader::new(logger);
-    let archives = loader.load_all(&recording_dir)?;
+    let p: PathBuf = PathBuf::from(&recording_dir).join(&project);
+    let archives = loader.load_all(&p)?;
     let s = PlaybackServerConfig::new(project, socket_addr, archives, delay);
     Ok(vec![s])
 }

@@ -181,7 +181,9 @@ impl Config {
                 let delay = playback.delay.unwrap_or(DelayOptions::None);
                 let logger = logger.new(o!("loader" => "HarLoader"));
                 let loader = HarLoader::new(logger);
-                let archives = loader.load_all(&recording_dir)?;
+                let p: PathBuf = recording_dir.into();
+                let p = p.join(&name);
+                let archives = loader.load_all(&p)?;
 
                 Ok(PlaybackServerConfig::new(
                     name,
