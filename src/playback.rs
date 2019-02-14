@@ -1,42 +1,24 @@
 use crate::archive::{ArchivedRequest, RequestFacts};
+use crate::config::{DelayOptions, PlaybackServerConfig};
 use failure::Error;
-use futures::future::{self, FutureResult};
+use futures::future::{self, Either, FutureResult};
 use futures::{Future, Stream};
 use hyper::http::request::Parts as RequestParts;
 use hyper::service::{MakeService, Service};
 use hyper::{header, Body, Chunk, Request, Response, Server};
 use slog::Logger;
-use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
-
-pub struct PlaybackServer {
-    name: String,
-    socket: SocketAddr,
-    archives: Vec<ArchivedRequest>,
-}
 
 pub struct MakePlaybackService {
     logger: Logger,
     transactions: Arc<RwLock<Vec<ArchivedRequest>>>,
+    delay: DelayOptions,
 }
 
 pub struct PlaybackService {
     logger: Logger,
     transactions: Arc<RwLock<Vec<ArchivedRequest>>>,
-}
-
-impl PlaybackServer {
-    pub fn new<S: Into<String>>(
-        name: S,
-        socket: SocketAddr,
-        archives: Vec<ArchivedRequest>,
-    ) -> PlaybackServer {
-        PlaybackServer {
-            name: name.into(),
-            socket,
-            archives,
-        }
-    }
+    delay: DelayOptions,
 }
 
 impl<C> MakeService<C> for MakePlaybackService {
@@ -52,6 +34,7 @@ impl<C> MakeService<C> for MakePlaybackService {
         future::ok(PlaybackService::new(
             self.logger.clone(),
             self.transactions.clone(),
+            self.delay.clone(),
         ))
     }
 }
@@ -72,7 +55,7 @@ impl Service for PlaybackService {
             .unwrap_or("/".to_string());
 
         let logger = self.logger.new(o!("method" => method, "path" => path));
-
+        let delay = self.delay;
         let r = body
             .concat2()
             .map_err(|e| Error::from(e))
@@ -80,13 +63,20 @@ impl Service for PlaybackService {
                 let transactions = &transactions.read().unwrap();
                 if let Some(m) = find_match(&transactions, &parts, b.into_bytes().to_vec()) {
                     info!(logger, "Serving archived response");
-                    m.hyper_response()
+                    let response = m.hyper_response();
+                    Either::A(
+                        m.delay(&delay)
+                            .map_err(|e| Error::from(e))
+                            .and_then(move |_| response),
+                    )
                 } else {
                     error!(logger, "Response for request not found in archives");
-                    Ok(Response::builder()
-                        .status(404)
-                        .body(Body::from(Chunk::from("Not Found")))
-                        .unwrap())
+                    Either::B(future::ok(
+                        Response::builder()
+                            .status(404)
+                            .body(Body::from(Chunk::from("Not Found")))
+                            .unwrap(),
+                    ))
                 }
             });
         Box::new(r)
@@ -94,19 +84,29 @@ impl Service for PlaybackService {
 }
 
 impl MakePlaybackService {
-    pub fn new(logger: Logger, transactions: Vec<ArchivedRequest>) -> MakePlaybackService {
+    pub fn new(
+        logger: Logger,
+        transactions: Vec<ArchivedRequest>,
+        delay: DelayOptions,
+    ) -> MakePlaybackService {
         MakePlaybackService {
             logger,
             transactions: Arc::new(RwLock::new(transactions)),
+            delay,
         }
     }
 }
 
 impl PlaybackService {
-    fn new(logger: Logger, transactions: Arc<RwLock<Vec<ArchivedRequest>>>) -> PlaybackService {
+    fn new(
+        logger: Logger,
+        transactions: Arc<RwLock<Vec<ArchivedRequest>>>,
+        delay: DelayOptions,
+    ) -> PlaybackService {
         PlaybackService {
             logger,
             transactions,
+            delay,
         }
     }
 }
@@ -156,7 +156,7 @@ fn find_match<'a, 'b>(
     transactions.iter().find(|t| t.matches(&facts))
 }
 
-pub fn get_playback_servers<I: IntoIterator<Item = PlaybackServer>>(
+pub fn get_playback_servers<I: IntoIterator<Item = PlaybackServerConfig>>(
     logger: Logger,
     servers: I,
 ) -> impl Future<Item = (), Error = ()> {
@@ -165,7 +165,7 @@ pub fn get_playback_servers<I: IntoIterator<Item = PlaybackServer>>(
         let start_logger = req_logger.new(o!("lifecycle" => "startup"));
         let serve_logger = req_logger.new(o!("lifecycle" => "error"));
         let socket = s.socket.clone();
-        let factory = MakePlaybackService::new(req_logger, s.archives);
+        let factory = MakePlaybackService::new(req_logger, s.archives, s.delay);
         future::lazy(move || {
             info!(start_logger, "Playback listening on {}", &socket);
             Ok(())

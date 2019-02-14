@@ -1,4 +1,5 @@
 use crate::archive::HarSession;
+use crate::config::ProxyServerConfig;
 use failure::Error;
 use futures::future::{self, FutureResult};
 use futures::{Future, Stream};
@@ -10,7 +11,6 @@ use hyper::{Body, Chunk, Request, Response, Server, Uri};
 use hyper_rustls::HttpsConnector;
 use slog::FnValue;
 use slog::Logger;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 type Client = HyperClient<HttpsConnector<HttpConnector>, Body>;
@@ -33,13 +33,6 @@ lazy_static! {
 #[fail(display = "Proxy target '{}' has no authority", uri)]
 pub struct AuthorityError {
     uri: Uri,
-}
-
-pub struct ProxyServer {
-    name: String,
-    socket: SocketAddr,
-    archive_path: PathBuf,
-    proxy_for: Uri,
 }
 
 pub struct MakeProxyService {
@@ -85,22 +78,6 @@ fn calculate_target_uri<B>(requested: &Uri, proxied: &Uri) -> Result<Uri, Error>
 fn create_proxied_response<B>(mut response: Response<B>) -> Response<B> {
     remove_hop_headers(response.headers_mut());
     response
-}
-
-impl ProxyServer {
-    pub fn new<S: Into<String>, P: Into<PathBuf>>(
-        name: S,
-        socket: SocketAddr,
-        proxy_for: Uri,
-        archive_path: P,
-    ) -> ProxyServer {
-        ProxyServer {
-            name: name.into(),
-            socket,
-            proxy_for,
-            archive_path: archive_path.into(),
-        }
-    }
 }
 
 impl MakeProxyService {
@@ -290,7 +267,7 @@ impl Service for ProxyService {
     }
 }
 
-pub fn get_proxy_servers<I: IntoIterator<Item = ProxyServer>>(
+pub fn get_proxy_servers<I: IntoIterator<Item = ProxyServerConfig>>(
     logger: Logger,
     servers: I,
 ) -> impl Future<Item = (), Error = ()> {

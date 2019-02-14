@@ -5,6 +5,8 @@ extern crate lazy_static;
 #[macro_use]
 extern crate failure;
 mod archive;
+mod cli;
+mod config;
 mod playback;
 mod proxy;
 
@@ -14,10 +16,9 @@ use slog_term;
 
 use slog::Drain;
 
-use futures::Future;
-use hyper::{rt, Server, Uri};
+use cli::CliConfig;
+use hyper::rt;
 
-use std::net::SocketAddr;
 lazy_static! {
     pub static ref VERSION: &'static str = option_env!("CARGO_PKG_VERSION").unwrap_or("unknown");
 }
@@ -31,23 +32,18 @@ fn new_root_logger() -> slog::Logger {
 
 fn main() -> Result<(), Error> {
     let root_logger = new_root_logger();
-
-    let proxy_servers = vec![
-        proxy::ProxyServer::new(
-            "dagbladet",
-            ([127, 0, 0, 1], 8080).into(),
-            "https://www.dagbladet.no".parse()?,
-            "recordings",
-        ),
-        proxy::ProxyServer::new(
-            "google",
-            ([127, 0, 0, 1], 8081).into(),
-            "https://www.google.com".parse()?,
-            "recordings",
-        ),
-    ];
-    let servers = proxy::get_proxy_servers(root_logger, proxy_servers);
-    rt::run(servers);
+    let logger = root_logger.new(o!("lifecycle" => "config"));
+    let config = cli::get_config(logger)?;
+    match config {
+        CliConfig::Proxy(servers) => {
+            let server = proxy::get_proxy_servers(root_logger, servers);
+            rt::run(server);
+        }
+        CliConfig::Playback(servers) => {
+            let server = playback::get_playback_servers(root_logger, servers);
+            rt::run(server);
+        }
+    }
 
     Ok(())
 }

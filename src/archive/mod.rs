@@ -7,9 +7,11 @@ use hyper::header::{HeaderName, HeaderValue};
 use hyper::http::Method;
 use hyper::{Body, Chunk, Response as HyperResponse};
 
+use crate::config::DelayOptions;
 pub use load::{HarLoader, HarLoadingError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 pub use store::{HarSession, IncompleteEntryError};
+use tokio::timer::Delay;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestFacts {
@@ -49,6 +51,16 @@ impl ArchivedRequest {
             Ok(builder.body(body)?)
         } else {
             Ok(builder.body(Body::empty())?)
+        }
+    }
+
+    pub fn delay(&self, d: &DelayOptions) -> Delay {
+        match d {
+            DelayOptions::None => Delay::new(Instant::now()),
+            DelayOptions::Original => Delay::new(Instant::now() + self.original_timing),
+            DelayOptions::Static { millis: ms } => {
+                Delay::new(Instant::now() + Duration::from_millis(*ms))
+            }
         }
     }
 

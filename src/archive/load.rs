@@ -4,7 +4,7 @@ use base64;
 use failure::Error;
 use har::v1_2::*;
 use har::Har;
-use hyper::{header::HeaderName, Body, Chunk, Method, Response as HyperResponse, Uri, Version};
+use hyper::{Method, Uri, Version};
 use serde_json;
 use slog::Logger;
 use std::fs;
@@ -139,25 +139,6 @@ impl HarLoader {
         // TODO: figure out if we care about Headers
 
         Ok(results)
-    }
-
-    fn get_response(&self, r: &Response) -> Result<HyperResponse<Body>, Error> {
-        let mut builder = HyperResponse::builder();
-        builder.status(r.status as u16);
-        builder.version(http_version_for_str(&r.http_version)?);
-        for h in &r.headers {
-            let header_name = HeaderName::from_lowercase(h.name.to_lowercase().as_bytes())?;
-            builder.header(header_name, h.value.to_string());
-        }
-        // ignoring the mime type from the Content object because the Content-Type header should
-        // should have already been set
-        let (bytes, _mime_type) = response_body_and_encoding(&r.content)?;
-        if let Some(b) = bytes {
-            let body = Body::from(Chunk::from(b));
-            Ok(builder.body(body)?)
-        } else {
-            Ok(builder.body(Body::empty())?)
-        }
     }
 
     fn load_entry(&self, e: &Entries) -> Result<ArchivedRequest, Error> {
