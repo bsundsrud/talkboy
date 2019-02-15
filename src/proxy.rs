@@ -40,6 +40,7 @@ pub struct MakeProxyService {
     proxy_for: Uri,
     client: Client,
     archive_path: PathBuf,
+    ignored_status_codes: Vec<u16>,
 }
 
 pub struct ProxyService {
@@ -48,6 +49,7 @@ pub struct ProxyService {
     host_header: HeaderValue,
     client: Client,
     archive_path: PathBuf,
+    ignored_status_codes: Vec<u16>,
 }
 
 fn remove_hop_headers(headers: &mut HeaderMap) {
@@ -58,7 +60,7 @@ fn remove_hop_headers(headers: &mut HeaderMap) {
 
 fn extract_authority(uri: &Uri) -> Result<Authority, AuthorityError> {
     uri.authority_part()
-        .map(|a| a.clone())
+        .cloned()
         .ok_or_else(|| AuthorityError { uri: uri.clone() })
 }
 
@@ -81,11 +83,12 @@ fn create_proxied_response<B>(mut response: Response<B>) -> Response<B> {
 }
 
 impl MakeProxyService {
-    pub fn new<S: Into<String>, P: AsRef<Path>>(
+    pub fn new<S: Into<String>, P: AsRef<Path>, V: Into<Vec<u16>>>(
         logger: &Logger,
         proxy_for: Uri,
         name: S,
         archive_path: P,
+        ignored_status_codes: V,
     ) -> MakeProxyService {
         let name = name.into();
         let uri = format!("{}", proxy_for);
@@ -97,6 +100,7 @@ impl MakeProxyService {
             proxy_for,
             client,
             archive_path: archive_path.as_ref().join(name),
+            ignored_status_codes: ignored_status_codes.into(),
         }
     }
 }
@@ -108,6 +112,7 @@ impl ProxyService {
         host_header: HeaderValue,
         client: Client,
         archive_path: PathBuf,
+        ignored_status_codes: Vec<u16>,
     ) -> ProxyService {
         ProxyService {
             logger,
@@ -115,6 +120,7 @@ impl ProxyService {
             client,
             host_header,
             archive_path,
+            ignored_status_codes,
         }
     }
 
@@ -161,6 +167,7 @@ impl<C> MakeService<C> for MakeProxyService {
             host_header,
             self.client.clone(),
             self.archive_path.clone(),
+            self.ignored_status_codes.clone(),
         );
         trace!(self.logger, "Created ProxyService instance");
         future::ok(proxy)
@@ -176,7 +183,7 @@ impl Service for ProxyService {
         trace!(self.logger, "Starting request");
         let target = match calculate_target_uri::<Self::ReqBody>(&req.uri(), &self.proxy_for) {
             Ok(u) => u,
-            Err(e) => return Box::new(future::err(e.into())),
+            Err(e) => return Box::new(future::err(e)),
         };
 
         trace!(self.logger, "Calculated new Uri '{}'", target);
@@ -186,7 +193,7 @@ impl Service for ProxyService {
             .uri()
             .path_and_query()
             .map(|pq| format!("{}", pq))
-            .unwrap_or("/".to_string());
+            .unwrap_or_else(|| "/".to_string());
         let path_without_query = proxied_req.uri().path().to_string();
         let method = proxied_req.method().to_string();
         if !self.archive_path.exists() {
@@ -196,6 +203,7 @@ impl Service for ProxyService {
                 Err(e) => return Box::new(future::err(e.into())),
             }
         }
+        let ignored_status_codes = self.ignored_status_codes.clone();
         let archive_path = self.archive_path.clone();
 
         let req_logger = self
@@ -206,7 +214,7 @@ impl Service for ProxyService {
         let client = self.client.clone();
         let fut = body
             .concat2()
-            .map_err(|e| Error::from(e))
+            .map_err(Error::from)
             .and_then(move |b| {
                 let mut har = HarSession::new();
                 let body: Vec<u8> = b.into_bytes().into_iter().collect();
@@ -216,7 +224,7 @@ impl Service for ProxyService {
                 Ok((req, har))
             })
             .and_then(move |(req, mut har)| {
-                trace!(req_logger, "Sending request");
+                info!(req_logger, "Sending request");
                 let err_logger = req_logger.new(o!("area" => "client-error"));
                 har.start_session();
                 client
@@ -239,26 +247,36 @@ impl Service for ProxyService {
                             .and_then(move |b| {
                                 let body: Vec<u8> = b.into_bytes().into_iter().collect();
                                 har.record_response(&head, body.clone());
-                                har.commit()?;
-                                let file_name_part = format!("{}.{}", method, path_without_query);
-                                trace!(
-                                    res_logger,
-                                    "Writing file to dir {:?}, name fragment {}",
-                                    &archive_path,
-                                    file_name_part
-                                );
-                                let filename = har.write_to_dir(&archive_path, file_name_part)?;
-                                info!(
+                                if ignored_status_codes.contains(&head.status.as_u16()) {
+                                    info!(
+                                        res_logger,
+                                        "Ignoring response with status {}",
+                                        head.status.as_u16()
+                                    );
+                                } else {
+                                    har.commit()?;
+                                    let file_name_part =
+                                        format!("{}.{}", method, path_without_query);
+                                    trace!(
+                                        res_logger,
+                                        "Writing file to dir {:?}, name fragment {}",
+                                        &archive_path,
+                                        file_name_part
+                                    );
+                                    let filename =
+                                        har.write_to_dir(&archive_path, file_name_part)?;
+                                    info!(
                                     res_logger,
                                     "Received Response, Wrote file"; "file_name" => FnValue(|_| {
-                                         archive_path.join(&filename).to_string_lossy().into_owned()
-                                    }) );
+                                        archive_path.join(&filename).to_string_lossy().into_owned()
+                                    }));
+                                }
                                 let new_body: Body = Body::from(Chunk::from(body));
                                 Ok(Response::from_parts(head, new_body))
                             })
                             .map_err(move |e| {
                                 error!(resp_err_logger, "{}", e);
-                                Error::from(e)
+                                e
                             })
                     })
             });
@@ -276,8 +294,14 @@ pub fn get_proxy_servers<I: IntoIterator<Item = ProxyServerConfig>>(
         let req_logger = logger.new(o!( "lifecycle" => "run"));
         let start_logger = logger.new(o!("lifecycle" => "startup"));
         let serve_logger = logger.new(o!("lifecycle" => "error"));
-        let socket = s.socket.clone();
-        let factory = MakeProxyService::new(&req_logger, s.proxy_for, s.name, s.archive_path);
+        let socket = s.socket;
+        let factory = MakeProxyService::new(
+            &req_logger,
+            s.proxy_for,
+            s.name,
+            s.archive_path,
+            s.ignored_status_codes,
+        );
         future::lazy(move || {
             info!(start_logger, "Listening on {}", &socket);
             Ok::<(), ()>(())

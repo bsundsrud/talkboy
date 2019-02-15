@@ -27,7 +27,7 @@ fn new_root_logger() -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let async_drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(async_drain, o!("version" => VERSION.clone()))
+    slog::Logger::root(async_drain, o!())
 }
 
 fn main() -> Result<(), Error> {

@@ -38,6 +38,7 @@ pub struct PlaybackConfig {
 #[derive(Debug, Deserialize)]
 pub struct ProxyConfig {
     uri: String,
+    ignored_status_codes: Option<Vec<u16>>,
 }
 
 pub struct PlaybackServerConfig {
@@ -68,6 +69,7 @@ pub struct ProxyServerConfig {
     pub socket: SocketAddr,
     pub archive_path: PathBuf,
     pub proxy_for: Uri,
+    pub ignored_status_codes: Vec<u16>,
 }
 
 impl ProxyServerConfig {
@@ -76,12 +78,14 @@ impl ProxyServerConfig {
         socket: SocketAddr,
         proxy_for: Uri,
         archive_path: P,
+        ignored_status_codes: Vec<u16>,
     ) -> ProxyServerConfig {
         ProxyServerConfig {
             name: name.into(),
             socket,
             proxy_for,
             archive_path: archive_path.into(),
+            ignored_status_codes,
         }
     }
 }
@@ -114,7 +118,7 @@ impl Iterator for NextUnusedPort {
                 return None;
             }
         }
-        let p = self.current.clone();
+        let p = self.current;
         self.observe(p);
         self.current += 1;
         if self.current == std::u16::MAX {
@@ -151,6 +155,7 @@ impl Config {
                     socket_addr,
                     uri,
                     &recording_dir,
+                    proxy.ignored_status_codes.unwrap_or_else(Vec::new),
                 ))
             })
             .collect::<Result<Vec<ProxyServerConfig>, Error>>()
@@ -220,6 +225,7 @@ delay = { method = "Static", millis = 500 }
 
 [project.proxy]
 uri = "https://www.google.com"
+ignored_status_codes = [ 500 ]
 "#;
         let val: Result<Config, _> = toml::from_str(&conf);
         match val {

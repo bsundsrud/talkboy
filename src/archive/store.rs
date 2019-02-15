@@ -53,19 +53,17 @@ impl HarSession {
     }
 
     fn get_log_mut(&mut self) -> &mut Log {
-        let log = match self.har.log {
+        match self.har.log {
             Spec::V1_2(ref mut s) => s,
             _ => unimplemented!(),
-        };
-        log
+        }
     }
 
     fn get_log(&self) -> &Log {
-        let log = match self.har.log {
+        match self.har.log {
             Spec::V1_2(ref s) => s,
             _ => unimplemented!(),
-        };
-        log
+        }
     }
 
     pub fn add_entry(&mut self, entry: Entries) {
@@ -81,9 +79,14 @@ impl HarSession {
         let mut digest = Sha256::new();
         let method = head.method.as_str().into();
         let url = format!("{}", &head.uri);
-        let http_version = string_for_http_version(&head.version);
+        let path_and_query = head
+            .uri
+            .path_and_query()
+            .map(|pq| format!("{}", pq))
+            .unwrap_or_else(|| "".to_string());
+        let http_version = string_for_http_version(head.version);
         digest.input(&method);
-        digest.input(&url);
+        digest.input(&path_and_query);
         digest.input(&http_version);
         digest.input(&body);
         let request_hash = format!("{:x}", digest.result());
@@ -117,9 +120,9 @@ impl HarSession {
             .to_string();
         let r = Response {
             charles_status: None,
-            status: head.status.as_u16() as i64,
+            status: i64::from(head.status.as_u16()),
             status_text: head.status.as_str().to_string(),
-            http_version: string_for_http_version(&head.version),
+            http_version: string_for_http_version(head.version),
             cookies: parse_response_cookies(&head.headers),
             headers: headers_to_har(&head.headers),
             content: response_body_to_har(body, mime_type),
@@ -180,7 +183,7 @@ impl HarSession {
                 .as_ref()
                 .map(|h| h.replace("hash:", ""))
                 .map(|h| h.chars().take(8).collect())
-                .unwrap_or("".to_string())
+                .unwrap_or_else(|| "".to_string())
         })
     }
 
@@ -240,8 +243,8 @@ fn normalize_path(s: &str) -> String {
     }
 }
 
-fn string_for_http_version(v: &Version) -> String {
-    match *v {
+fn string_for_http_version(v: Version) -> String {
+    match v {
         Version::HTTP_09 => "HTTP/0.9",
         Version::HTTP_10 => "HTTP/1.0",
         Version::HTTP_11 => "HTTP/1.1",
@@ -257,7 +260,7 @@ fn cookie_to_har(c: Cookie) -> Cookies {
         path: c.path().map(|p| p.into()),
         domain: c.domain().map(|d| d.into()),
         expires: c.expires().map(|e| format!("{}", e.rfc3339())),
-        http_only: c.http_only().map(|h| h.into()),
+        http_only: c.http_only(),
         secure: c.secure(),
         comment: None,
     }
@@ -293,9 +296,9 @@ fn headers_to_har(m: &HeaderMap) -> Vec<Headers> {
 
 fn query_string_to_har(p: &Option<&str>) -> Vec<QueryString> {
     p.map(|qs| {
-        qs.split("&")
+        qs.split('&')
             .filter_map(|pair| {
-                let mut iter = pair.splitn(2, "=");
+                let mut iter = pair.splitn(2, '=');
                 if let Some(k) = iter.next() {
                     if let Some(v) = iter.next() {
                         Some(QueryString {
@@ -316,7 +319,7 @@ fn query_string_to_har(p: &Option<&str>) -> Vec<QueryString> {
             })
             .collect()
     })
-    .unwrap_or_else(|| Vec::new())
+    .unwrap_or_else(Vec::new)
 }
 
 fn body_text(b: Vec<u8>) -> (String, bool) {

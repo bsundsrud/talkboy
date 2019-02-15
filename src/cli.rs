@@ -59,11 +59,18 @@ fn proxy_config_from_cli(
     port: u16,
     project: &str,
     proxy_for: &str,
+    ignored_status_codes: Vec<u16>,
 ) -> Result<Vec<ProxyServerConfig>, Error> {
     trace!(logger, "Creating Proxy config from CLI params");
     let socket_addr: SocketAddr = format!("{}:{}", addr, port).parse()?;
     let uri: Uri = proxy_for.parse()?;
-    let s = ProxyServerConfig::new(project, socket_addr, uri, recording_dir);
+    let s = ProxyServerConfig::new(
+        project,
+        socket_addr,
+        uri,
+        recording_dir,
+        ignored_status_codes,
+    );
 
     Ok(vec![s])
 }
@@ -114,7 +121,7 @@ pub fn get_config(logger: Logger) -> Result<CliConfig, Error> {
         .subcommand(
             SubCommand::with_name("record")
                 .about("Start a proxy to record HTTP sessions")
-                .usage("talkboy record [OPTIONS] (--config CONFIG | [--addr ADDR] [--port PORT] PROJECT URL)")
+                .usage("talkboy record [OPTIONS] (--config CONFIG | [--addr ADDR] [--port PORT] [--ignore STATUS_CODES] PROJECT URL)")
                 .arg(
                     Arg::with_name("config_file")
                         .short("c")
@@ -145,6 +152,17 @@ pub fn get_config(logger: Logger) -> Result<CliConfig, Error> {
                         .validator(port_validator),
                 )
                 .arg(
+                    Arg::with_name("ignored_status_codes")
+                        .short("i")
+                        .long("ignore")
+                        .takes_value(true)
+                        .value_name("STATUS_CODES")
+                        .use_delimiter(true)
+                        .required(false)
+                        .help("Comma-delimited status codes to ignore and not record responses for")
+                        .validator(type_validator::<u16>),
+                )
+                .arg(
                     Arg::with_name("project_name")
                         .value_name("PROJECT")
                         .help("Project name used to group HTTP sessions")
@@ -167,6 +185,7 @@ pub fn get_config(logger: Logger) -> Result<CliConfig, Error> {
                         .arg("port")
                         .arg("project_name")
                         .arg("proxy_for")
+                        .arg("ignored_status_codes")
                         .multiple(true)
                         .conflicts_with("from_config"),
                 ),
@@ -262,12 +281,25 @@ pub fn get_config(logger: Logger) -> Result<CliConfig, Error> {
             let logger = logger.new(o!("config_from" => "cli"));
             let addr = m.value_of("addr").expect("addr has a default");
             let port: u16 = m.value_of("port").expect("port has a default").parse()?;
+            let ignored_status_codes: Vec<u16> = match m.values_of("ignored_status_codes") {
+                Some(i) => i.map(|v| v.parse()).collect::<Result<Vec<u16>, _>>()?,
+                None => Vec::new(),
+            };
             let project = m
                 .value_of("project_name")
                 .expect("project_name is required");
             let proxy_for = m.value_of("proxy_for").expect("proxy_for is required");
-            proxy_config_from_cli(logger, &recording_dir, &addr, port, &project, &proxy_for)?
+            proxy_config_from_cli(
+                logger,
+                &recording_dir,
+                &addr,
+                port,
+                &project,
+                &proxy_for,
+                ignored_status_codes,
+            )?
         };
+
         Ok(CliConfig::Proxy(configs))
     } else if let Some(m) = matches.subcommand_matches("playback") {
         let logger = logger.new(o!("config_for" => "playback"));

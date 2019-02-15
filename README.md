@@ -15,16 +15,17 @@ talkboy-record
 Start a proxy to record HTTP sessions
 
 USAGE:
-    talkboy record [OPTIONS] (--config CONFIG | [--addr ADDR] [--port PORT] PROJECT URL)
+    talkboy record [OPTIONS] (--config CONFIG | [--addr ADDR] [--port PORT] [--ignore STATUS_CODES] PROJECT URL)
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -a, --addr <ADDR>        Address to listen on [default: 127.0.0.1]
-    -c, --config <CONFIG>    Use config file to specify proxy options
-    -p, --port <PORT>        Port to listen on [default: 8080]
+    -a, --addr <ADDR>              Address to listen on [default: 127.0.0.1]
+    -c, --config <CONFIG>          Use config file to specify proxy options
+    -i, --ignore <STATUS_CODES>    Comma-delimited status codes to ignore and not record responses for
+    -p, --port <PORT>              Port to listen on [default: 8080]
 
 ARGS:
     <PROJECT>    Project name used to group HTTP sessions
@@ -90,6 +91,8 @@ delay = { method = "None" }
 [project.proxy]
 # Required. URI to proxy requests to while in record mode
 uri = "https://api1.example.com"
+# Optional.  List of status codes to not record responses for
+ignored_status_codes = [ 503 ]
 
 [[project]]
 name = "bar"
@@ -101,6 +104,28 @@ delay = { method = "Static", millis = 500 }
 [project.proxy]
 uri = "https://api2.example.com"
 ```
+
+# Updating Recordings
+
+Recordings have a hash associated with them based on the following pieces of information from the *Request*:
+* HTTP Method
+* Path and query string
+* HTTP Version
+* POST body, if any
+
+The full hash can be found in the `comment` field of the request entry in the corresponding HAR file.
+
+The file name of the HAR archive is formatted according to `[HTTP Method].[up to 20 characters of the path].[the first 8 characters of the request hash as above].json`. The request path will be normalized to replace everything but `[a-zA-Z0-9_-\.]` with `-`.
+
+This is done so that updating the response is as easy as re-running `talkboy record` with the same project.  If the same request results in a new body, the old recording will be overwritten.
+
+# Divergence from the HAR spec
+
+## PostData encoding
+
+HAR 1.2 provides no way of specifying a POST body as anything other than key/value form data or plain text.  If a POST body contains non-UTF8 characters, talkboy will base64-encode the POST body, place it in the `text` field, and set the comment on the `PostData` object to `"base64"`.
+
+There is a proposed HAR 1.3 draft that fixes this problem by adding an `encoding` field to `PostData`, which mirrors how the `Content` object works for Response bodies.
 
 # Building
 

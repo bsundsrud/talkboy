@@ -34,7 +34,7 @@ impl<C> MakeService<C> for MakePlaybackService {
         future::ok(PlaybackService::new(
             self.logger.clone(),
             self.transactions.clone(),
-            self.delay.clone(),
+            self.delay,
         ))
     }
 }
@@ -52,33 +52,30 @@ impl Service for PlaybackService {
             .uri
             .path_and_query()
             .map(|pq| format!("{}", pq))
-            .unwrap_or("/".to_string());
+            .unwrap_or_else(|| "/".to_string());
 
         let logger = self.logger.new(o!("method" => method, "path" => path));
         let delay = self.delay;
-        let r = body
-            .concat2()
-            .map_err(|e| Error::from(e))
-            .and_then(move |b| {
-                let transactions = &transactions.read().unwrap();
-                if let Some(m) = find_match(&transactions, &parts, b.into_bytes().to_vec()) {
-                    info!(logger, "Serving archived response");
-                    let response = m.hyper_response();
-                    Either::A(
-                        m.delay(&delay)
-                            .map_err(|e| Error::from(e))
-                            .and_then(move |_| response),
-                    )
-                } else {
-                    error!(logger, "Response for request not found in archives");
-                    Either::B(future::ok(
-                        Response::builder()
-                            .status(404)
-                            .body(Body::from(Chunk::from("Not Found")))
-                            .unwrap(),
-                    ))
-                }
-            });
+        let r = body.concat2().map_err(Error::from).and_then(move |b| {
+            let transactions = &transactions.read().unwrap();
+            if let Some(m) = find_match(&transactions, &parts, b.into_bytes().to_vec()) {
+                info!(logger, "Serving archived response");
+                let response = m.hyper_response();
+                Either::A(
+                    m.delay(&delay)
+                        .map_err(Error::from)
+                        .and_then(move |_| response),
+                )
+            } else {
+                error!(logger, "Response for request not found in archives");
+                Either::B(future::ok(
+                    Response::builder()
+                        .status(404)
+                        .body(Body::from(Chunk::from("Not Found")))
+                        .unwrap(),
+                ))
+            }
+        });
         Box::new(r)
     }
 }
@@ -164,7 +161,7 @@ pub fn get_playback_servers<I: IntoIterator<Item = PlaybackServerConfig>>(
         let req_logger = logger.new(o!("server" => s.name.to_string(), "lifecycle" => "run"));
         let start_logger = req_logger.new(o!("lifecycle" => "startup"));
         let serve_logger = req_logger.new(o!("lifecycle" => "error"));
-        let socket = s.socket.clone();
+        let socket = s.socket;
         let factory = MakePlaybackService::new(req_logger, s.archives, s.delay);
         future::lazy(move || {
             info!(start_logger, "Playback listening on {}", &socket);

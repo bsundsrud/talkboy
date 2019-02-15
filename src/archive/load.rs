@@ -102,15 +102,13 @@ impl HarLoader {
         let f = File::open(&path)?;
         let har: Har = serde_json::from_reader(f)?;
         trace!(self.logger, "Loaded HAR for {:?}", &path);
-        match har.log {
-            Spec::V1_2(log) => {
-                let fname = path.to_string_lossy().into_owned();
-                info!(self.logger, "Found HAR v1.2 with {} entries", log.entries.len(); "path" => fname);
-                return log.entries.iter().map(|e| self.load_entry(e)).collect();
-            }
-            _ => {}
+        if let Spec::V1_2(log) = har.log {
+            let fname = path.to_string_lossy().into_owned();
+            info!(self.logger, "Found HAR v1.2 with {} entries", log.entries.len(); "path" => fname);
+            log.entries.iter().map(|e| self.load_entry(e)).collect()
+        } else {
+            Err(HarLoadingError::InvalidVersion.into())
         }
-        Err(HarLoadingError::InvalidVersion.into())
     }
 
     fn get_facts(&self, r: &Request) -> Result<Vec<RequestFacts>, Error> {
