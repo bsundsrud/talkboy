@@ -1,14 +1,12 @@
+use super::convert;
 use crate::VERSION;
-use base64;
 use chrono::prelude::*;
-use cookie::Cookie;
 use failure::Error;
 use har::v1_2::*;
 use har::{Har, Spec};
+use hyper::header;
 use hyper::http::request::Parts as ReqParts;
 use hyper::http::response::Parts as ResParts;
-use hyper::Version;
-use hyper::{header, HeaderMap};
 use regex::Regex;
 use serde_json;
 use sha2::{Digest, Sha256};
@@ -84,7 +82,7 @@ impl HarSession {
             .path_and_query()
             .map(|pq| format!("{}", pq))
             .unwrap_or_else(|| "".to_string());
-        let http_version = string_for_http_version(head.version);
+        let http_version = convert::HttpVersion::har(head.version);
         digest.input(&method);
         digest.input(&path_and_query);
         digest.input(&http_version);
@@ -94,10 +92,14 @@ impl HarSession {
             method,
             url,
             http_version,
-            cookies: parse_request_cookies(&head.headers),
-            headers: headers_to_har(&head.headers),
-            query_string: query_string_to_har(&head.uri.query()),
-            post_data: request_body_to_har(body, mime_type),
+            cookies: convert::ClientCookies::har(&head.headers),
+            headers: head
+                .headers
+                .iter()
+                .map(|(k, v)| convert::Header::har(&k, &v))
+                .collect(),
+            query_string: convert::Query::har(&head.uri.query()),
+            post_data: convert::RequestBody::har(body, mime_type.to_string()),
             headers_size: -1,
             body_size: -1,
             comment: Some(format!("hash:{}", &request_hash)),
@@ -122,10 +124,14 @@ impl HarSession {
             charles_status: None,
             status: i64::from(head.status.as_u16()),
             status_text: head.status.as_str().to_string(),
-            http_version: string_for_http_version(head.version),
-            cookies: parse_response_cookies(&head.headers),
-            headers: headers_to_har(&head.headers),
-            content: response_body_to_har(body, mime_type),
+            http_version: convert::HttpVersion::har(head.version),
+            cookies: convert::ServerCookies::har(&head.headers),
+            headers: head
+                .headers
+                .iter()
+                .map(|(k, v)| convert::Header::har(k, v))
+                .collect(),
+            content: convert::ResponseBody::har(body, mime_type.to_string()),
             redirect_url,
             headers_size: -1,
             body_size: -1,
@@ -240,133 +246,6 @@ fn normalize_path(s: &str) -> String {
         normalized.chars().take(20).collect()
     } else {
         normalized
-    }
-}
-
-fn string_for_http_version(v: Version) -> String {
-    match v {
-        Version::HTTP_09 => "HTTP/0.9",
-        Version::HTTP_10 => "HTTP/1.0",
-        Version::HTTP_11 => "HTTP/1.1",
-        Version::HTTP_2 => "HTTP/2",
-    }
-    .into()
-}
-
-fn cookie_to_har(c: Cookie) -> Cookies {
-    Cookies {
-        name: c.name().into(),
-        value: c.value().into(),
-        path: c.path().map(|p| p.into()),
-        domain: c.domain().map(|d| d.into()),
-        expires: c.expires().map(|e| format!("{}", e.rfc3339())),
-        http_only: c.http_only(),
-        secure: c.secure(),
-        comment: None,
-    }
-}
-
-fn parse_request_cookies(m: &HeaderMap) -> Vec<Cookies> {
-    m.get_all(header::COOKIE)
-        .iter()
-        .flat_map(|c| c.to_str().expect("Invalid encoding in cookie").split("; "))
-        .map(|c| Cookie::parse(c).expect("Couldn't parse cookie"))
-        .map(cookie_to_har)
-        .collect()
-}
-
-fn parse_response_cookies(m: &HeaderMap) -> Vec<Cookies> {
-    m.get_all(header::SET_COOKIE)
-        .iter()
-        .map(|c| c.to_str().expect("Invalid encoding in cookie"))
-        .map(|c| Cookie::parse(c).expect("Couldn't parse cookie"))
-        .map(cookie_to_har)
-        .collect()
-}
-
-fn headers_to_har(m: &HeaderMap) -> Vec<Headers> {
-    m.iter()
-        .map(|(key, val)| {
-            let (v, encoded) = match val.to_str() {
-                Ok(s) => (s.to_string(), false),
-                Err(_e) => (base64::encode(val.as_bytes()), true),
-            };
-            Headers {
-                name: key.as_str().to_string(),
-                value: v,
-                comment: if encoded {
-                    Some("base64".to_string())
-                } else {
-                    None
-                },
-            }
-        })
-        .collect()
-}
-
-fn query_string_to_har(p: &Option<&str>) -> Vec<QueryString> {
-    p.map(|qs| {
-        qs.split('&')
-            .filter_map(|pair| {
-                let mut iter = pair.splitn(2, '=');
-                if let Some(k) = iter.next() {
-                    if let Some(v) = iter.next() {
-                        Some(QueryString {
-                            name: k.to_string(),
-                            value: v.to_string(),
-                            comment: None,
-                        })
-                    } else {
-                        Some(QueryString {
-                            name: k.to_string(),
-                            value: "".to_string(),
-                            comment: None,
-                        })
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect()
-    })
-    .unwrap_or_else(Vec::new)
-}
-
-fn body_text(b: Vec<u8>) -> (String, bool) {
-    match String::from_utf8(b) {
-        Ok(s) => (s, false),
-        Err(e) => (base64::encode(e.as_bytes()), true),
-    }
-}
-
-fn request_body_to_har<S: Into<String>>(b: Vec<u8>, mime_type: S) -> Option<PostData> {
-    if b.is_empty() {
-        None
-    } else {
-        let (text, base64_encoded) = body_text(b);
-        Some(PostData {
-            mime_type: mime_type.into(),
-            text,
-            params: None,
-            comment: if base64_encoded {
-                Some("base64".into())
-            } else {
-                None
-            },
-        })
-    }
-}
-
-fn response_body_to_har<S: Into<String>>(b: Vec<u8>, mime_type: S) -> Content {
-    let size = b.len() as i64;
-    let (text, encoded) = body_text(b);
-    Content {
-        size,
-        compression: None,
-        mime_type: mime_type.into(),
-        text: if text.is_empty() { None } else { Some(text) },
-        encoding: if encoded { Some("base64".into()) } else { None },
-        comment: None,
     }
 }
 

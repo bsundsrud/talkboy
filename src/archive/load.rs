@@ -1,10 +1,10 @@
 #![allow(unreachable_patterns)]
+use super::convert;
 use super::{ArchivedRequest, RequestFacts};
-use base64;
 use failure::Error;
 use har::v1_2::*;
 use har::{Har, Spec};
-use hyper::{Method, Uri, Version};
+use hyper::{Method, Uri};
 use serde_json;
 use slog::Logger;
 use std::fs;
@@ -20,59 +20,11 @@ pub enum HarLoadingError {
     InvalidVersion,
     #[fail(display = "Couldn't create matcher: {}", _0)]
     InvalidMatcher(String),
-    #[fail(display = "Couldn't create response: {}", _0)]
-    InvalidResponse(String),
 }
 
 pub struct HarLoader {
     logger: Logger,
 }
-
-pub fn request_body_and_encoding(d: &PostData) -> Result<(Vec<u8>, String), Error> {
-    let encoding = d.mime_type.to_string();
-    let body = if let Some(c) = &d.comment {
-        if c == "base64" {
-            base64::decode(&d.text)?
-        } else {
-            d.text.as_bytes().to_vec()
-        }
-    } else {
-        d.text.as_bytes().to_vec()
-    };
-    Ok((body, encoding))
-}
-
-pub fn response_body_and_encoding(c: &Content) -> Result<(Option<Vec<u8>>, String), Error> {
-    if c.text.is_none() {
-        return Ok((None, "".to_string()));
-    }
-    let text = c.text.as_ref().map(|t| t.to_string()).unwrap();
-    let mime_type = c.mime_type.to_string();
-    let body = if let Some(e) = &c.encoding {
-        if e == "base64" {
-            base64::decode(&text)?
-        } else {
-            text.as_bytes().to_vec()
-        }
-    } else {
-        text.as_bytes().to_vec()
-    };
-    Ok((Some(body), mime_type))
-}
-
-pub fn http_version_for_str(s: &str) -> Result<Version, HarLoadingError> {
-    match s.to_uppercase().as_str() {
-        "HTTP/0.9" => Ok(Version::HTTP_09),
-        "HTTP/1.0" => Ok(Version::HTTP_10),
-        "HTTP/1.1" => Ok(Version::HTTP_11),
-        "HTTP/2" => Ok(Version::HTTP_2),
-        _ => Err(HarLoadingError::InvalidResponse(format!(
-            "Invalid HTTP version {}",
-            s
-        ))),
-    }
-}
-
 impl HarLoader {
     pub fn new(logger: Logger) -> HarLoader {
         HarLoader { logger }
@@ -126,7 +78,7 @@ impl HarLoader {
         results.push(RequestFacts::PathAndQuery(path));
 
         if let Some(d) = &r.post_data {
-            let (data, content_type) = request_body_and_encoding(&d)?;
+            let (data, content_type) = convert::RequestBody::bytes(&d)?;
             results.push(RequestFacts::Body { data, content_type });
         }
 

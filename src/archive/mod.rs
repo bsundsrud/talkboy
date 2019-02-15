@@ -1,3 +1,4 @@
+mod convert;
 mod load;
 mod store;
 
@@ -5,7 +6,7 @@ use failure::Error;
 use har::v1_2::Response as HarResponse;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::http::Method;
-use hyper::{Body, Chunk, Response as HyperResponse};
+use hyper::{Body, Response as HyperResponse};
 
 use crate::config::DelayOptions;
 pub use load::{HarLoader, HarLoadingError};
@@ -38,30 +39,15 @@ impl ArchivedRequest {
     pub fn hyper_response(&self) -> Result<HyperResponse<Body>, Error> {
         let mut builder = HyperResponse::builder();
         builder.status(self.response.status as u16);
-        builder.version(load::http_version_for_str(&self.response.http_version)?);
+        builder.version(convert::HttpVersion::hyper(&self.response.http_version)?);
         for h in &self.response.headers {
-            let header_name = HeaderName::from_lowercase(h.name.to_lowercase().as_bytes())?;
-            let val = if let Some(c) = &h.comment {
-                if c == "base64" {
-                    HeaderValue::from_bytes(&base64::decode(&h.value)?)
-                } else {
-                    HeaderValue::from_str(&h.value)
-                }
-            } else {
-                HeaderValue::from_str(&h.value)
-            };
-
-            builder.header(header_name, val?);
+            let (k, v) = convert::Header::hyper(&h)?;
+            builder.header(k, v);
         }
         // ignoring the mime type from the Content object because the Content-Type header should
         // should have already been set
-        let (bytes, _mime_type) = load::response_body_and_encoding(&self.response.content)?;
-        if let Some(b) = bytes {
-            let body = Body::from(Chunk::from(b));
-            Ok(builder.body(body)?)
-        } else {
-            Ok(builder.body(Body::empty())?)
-        }
+        let (body, _mime_type) = convert::ResponseBody::hyper(&self.response.content)?;
+        Ok(builder.body(body)?)
     }
 
     pub fn delay(&self, d: &DelayOptions) -> Delay {
