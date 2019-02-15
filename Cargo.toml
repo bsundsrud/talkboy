@@ -11,7 +11,7 @@ tokio = "*"
 har = "*"
 lazy_static = "*"
 failure = "*"
-slog = { version = "*", features = [ "max_level_trace" ] }
+slog = { version = "*", features = [ "max_level_trace", "release_max_level_info" ] }
 slog-term = "*"
 slog-async = "*"
 clap = "*"
