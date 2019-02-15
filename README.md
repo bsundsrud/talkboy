@@ -127,6 +127,10 @@ HAR 1.2 provides no way of specifying a POST body as anything other than key/val
 
 There is a proposed HAR 1.3 draft that fixes this problem by adding an `encoding` field to `PostData`, which mirrors how the `Content` object works for Response bodies.
 
+## Header encoding
+
+HAR 1.2 also doesn't provide a way to specify header value encoding (and the 1.3 spec doesn't address this either).  According to [RFC7230 §3.2.4](https://tools.ietf.org/html/rfc7230#section-3.2.4), headers **SHOULD** be ASCII but to treat them as "opaque data" if octets fall outside that range.  That means that the functional datatype needed to represent a header value is a byte array that just happens to *usually* be a string.  Talkboy solves the problem as above and set the comment for that `Headers` object to `"base64"` and the `value` field will contain a base64-encoded string.
+
 # Building
 
 Requires a 2018-edition Rust compiler (version 1.32.0 used).
