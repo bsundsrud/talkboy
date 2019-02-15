@@ -41,7 +41,17 @@ impl ArchivedRequest {
         builder.version(load::http_version_for_str(&self.response.http_version)?);
         for h in &self.response.headers {
             let header_name = HeaderName::from_lowercase(h.name.to_lowercase().as_bytes())?;
-            builder.header(header_name, h.value.to_string());
+            let val = if let Some(c) = &h.comment {
+                if c == "base64" {
+                    HeaderValue::from_bytes(&base64::decode(&h.value)?)
+                } else {
+                    HeaderValue::from_str(&h.value)
+                }
+            } else {
+                HeaderValue::from_str(&h.value)
+            };
+
+            builder.header(header_name, val?);
         }
         // ignoring the mime type from the Content object because the Content-Type header should
         // should have already been set

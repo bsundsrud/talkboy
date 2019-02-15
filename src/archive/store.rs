@@ -286,10 +286,20 @@ fn parse_response_cookies(m: &HeaderMap) -> Vec<Cookies> {
 
 fn headers_to_har(m: &HeaderMap) -> Vec<Headers> {
     m.iter()
-        .map(|(key, val)| Headers {
-            name: key.as_str().to_string(),
-            value: val.to_str().unwrap().to_string(),
-            comment: None,
+        .map(|(key, val)| {
+            let (v, encoded) = match val.to_str() {
+                Ok(s) => (s.to_string(), false),
+                Err(_e) => (base64::encode(val.as_bytes()), true),
+            };
+            Headers {
+                name: key.as_str().to_string(),
+                value: v,
+                comment: if encoded {
+                    Some("base64".to_string())
+                } else {
+                    None
+                },
+            }
         })
         .collect()
 }
