@@ -178,7 +178,7 @@ impl Service for ProxyService {
     type ReqBody = Body;
     type ResBody = Body;
     type Error = Error;
-    type Future = Box<Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send>;
+    type Future = Box<dyn Future<Item = Response<Self::ResBody>, Error = Self::Error> + Send>;
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
         trace!(self.logger, "Starting request");
         let target = match calculate_target_uri::<Self::ReqBody>(&req.uri(), &self.proxy_for) {
